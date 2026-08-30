@@ -1,75 +1,100 @@
 # x86 Bootloader
 
-A boot sector written in raw x86 assembly that runs directly on bare metal
-(or QEMU) — no operating system, no C runtime, no libraries. Just 512 bytes
-handed off by the BIOS.
+A 512-byte boot sector written in raw 16-bit x86 assembly (NASM) that runs directly on bare metal or QEMU — with no operating system, no C runtime, and no external libraries.
 
 ![Boot menu screenshot](menu_screen1.png)
 
-## What's here
+## Overview
 
-| File          | What it does                                                       |
-|---------------|---------------------------------------------------------------------|
-| `01_hello.asm`| Minimal boot sector — prints `Hello, World!` and halts             |
-| `02_menu.asm` | Interactive text menu with keyboard input and a reboot option      |
+When the system boots, this program displays a `"Hello, World!"` splash screen and prompts for a keypress. Once pressed, it transitions into an interactive text menu with live options (Message, About, and Hardware Reboot).
 
-Both assemble to exactly 512 bytes and end with the mandatory `0x55AA`
-boot signature, which is what tells the BIOS "this disk is bootable."
+Everything fits within the strict 512-byte Master Boot Record (MBR) limit and ends with the mandatory `0x55AA` boot signature.
 
-## How it works
+## What's Here
 
-When a PC powers on, the BIOS runs POST, picks a boot device, loads the
-first 512-byte sector of that device into memory at address `0x7C00`,
-and jumps to it — in 16-bit real mode, with no OS, no memory protection,
-and no C library. Everything from that point on is on you.
+| File | Description |
+|---|---|
+| [`bootloader/02_menu.asm`](bootloader/02_menu.asm) | Single unified bootloader containing the startup splash + interactive menu + reboot handler |
+| [`bootloader/Makefile`](bootloader/Makefile) | Build and QEMU run automation script |
 
-This project uses:
-- **Real mode addressing** and manual segment register setup
-- **BIOS interrupts** for I/O — `int 0x10` (video teletype / mode set)
-  and `int 0x16` (keyboard input), since there's no OS to provide drivers
-- A **dispatch loop** that reads a keypress and jumps to the matching
-  menu option
-- A **keyboard-controller reset trick** (`out 0x64, 0xFE`) to reboot the
-  machine from the "Reboot" option, since there's no OS shutdown API to call
+---
 
-## Building and running
+## Boot Flow
 
-Requires [NASM](https://www.nasm.us/) and [QEMU](https://www.qemu.org/).
+```
+Power On / Reset
+       │
+       ▼
+BIOS POST & Device Selection
+       │
+       ▼
+Loads 512 bytes from disk into memory (0x7C00)
+       │
+       ▼
+Jumps to 0x7C00 (16-bit Real Mode)
+       │
+       ├─► Set up segment registers & stack
+       ├─► Clear screen (BIOS INT 0x10, AH=0x00)
+       ├─► Print "Hello, World! (from the bootloader)"
+       ├─► Wait for keypress (BIOS INT 0x16, AH=0x00)
+       │
+       ▼
+Enter Interactive Boot Menu
+       ├─► [1] Display System Message
+       ├─► [2] Display About Info
+       └─► [3] Pulse 8042 Keyboard Controller (Port 0x64, 0xFE) to Reboot
+```
+
+---
+
+## Technical Highlights
+
+- **16-Bit Real Mode**: Manual setup of segment registers (`DS`, `ES`, `SS`) and stack pointer (`SP = 0x7C00`).
+- **BIOS Interrupts**:
+  - `INT 0x10` (AH=0x0E): Teletype video character printing.
+  - `INT 0x10` (AX=0x0003): Video mode reset for instant screen clears.
+  - `INT 0x16` (AH=0x00): Blocking keyboard input.
+- **Hardware Reboot**: Direct port I/O (`out 0x64, 0xFE`) to trigger a hard reset via the keyboard controller line.
+- **Strict Size Constraint**: Fits entirely within 510 code/data bytes + 2-byte signature (`0xAA55`).
+
+---
+
+## Building and Running
+
+### Prerequisites
+- **NASM** (Netwide Assembler)
+- **QEMU** (`qemu-system-x86_64`)
 
 ```bash
-# Ubuntu/Debian
+# On Debian/Ubuntu / WSL:
 sudo apt install nasm qemu-system-x86
+```
 
-# build both boot sectors
+### Build & Run in QEMU
+```bash
+cd bootloader
+
+# Build the 512-byte binary
 make
 
-# boot the hello-world version
-make run-hello
-
-# boot the interactive menu
-make run-menu
+# Boot in QEMU
+make run
 ```
 
-To run on **real hardware** (use a spare USB drive — this will erase it):
+### Run on Bare Metal (Real Hardware)
+> [!WARNING]
+> This command will completely overwrite the target disk. Double check your drive identifier before running.
 
 ```bash
-sudo dd if=02_menu.bin of=/dev/sdX bs=512
+# Write directly to a USB drive (replace sdX with your drive)
+sudo dd if=bootloader/02_menu.bin of=/dev/sdX bs=512 status=progress && sync
 ```
+Boot your computer from the USB drive in **Legacy / CSM mode** (since this targets classic BIOS, not UEFI).
 
-Then boot from that USB drive via your BIOS/UEFI boot menu (you may need
-to enable Legacy/CSM boot, since this targets classic BIOS, not UEFI).
+---
 
-## Why 512 bytes is the hard limit
+## Future Roadmap
 
-The BIOS only ever loads the *first sector* of the boot disk. Everything
-you write — code and data — has to fit in that space, minus 2 bytes for
-the `0x55AA` signature. That constraint is why the menu strings are kept
-terse and why a real bootloader typically uses this stage only to load a
-larger "stage 2" from disk into memory before doing anything more
-ambitious (protected mode, a kernel, etc.).
-
-## What I'd extend next
-
-- A stage-2 loader that reads additional sectors from disk
-- Switching from 16-bit real mode into 32-bit protected mode
-- A minimal in-memory "kernel" the boot sector jumps into
+- [ ] Stage-2 bootloader that loads subsequent disk sectors into memory
+- [ ] Transition from 16-bit Real Mode to 32-bit Protected Mode (GDT setup)
+- [ ] Jump into a minimal bare-metal C kernel

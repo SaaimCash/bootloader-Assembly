@@ -1,5 +1,5 @@
-; A bootable text menu. Demonstrates:
-;   - BIOS teletype output (int 0x10, ah=0x0E)
+; A bootable x86 program. Demonstrates:
+;   - Printing a hello-world message via BIOS teletype (int 0x10, ah=0x0E)
 ;   - Screen clearing via video mode reset
 ;   - Keyboard input, blocking read (int 0x16, ah=0x00)
 ;   - A simple dispatch loop based on user choice
@@ -14,6 +14,13 @@ start:
     mov es, ax
     mov ss, ax
     mov sp, 0x7C00
+
+    ; --- Hello World splash screen ---
+    call clear_screen
+    mov si, hello_msg
+    call print_string
+    call wait_for_key
+    ; ----------------------------------
 
 main_menu:
     call clear_screen
@@ -94,6 +101,7 @@ wait_for_key:
     ret
 
 ; ---- Data (kept short: every byte counts in 512) ----
+hello_msg   db "Hello, World! (from the bootloader)", 13, 10, 0
 title_msg   db "== MY-OS Boot Menu ==", 13, 10, 13, 10, 0
 menu_msg    db "1) Message  2) About  3) Reboot", 13, 10, "> ", 0
 opt1_msg    db "Real mode. No OS. This IS the system.", 13, 10, 0
